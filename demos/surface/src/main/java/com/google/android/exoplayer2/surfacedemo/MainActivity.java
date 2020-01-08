@@ -19,6 +19,7 @@ import android.app.Activity;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Looper;
 import android.view.Surface;
 import android.view.SurfaceControl;
 import android.view.SurfaceHolder;
@@ -28,6 +29,10 @@ import android.widget.Button;
 import android.widget.GridLayout;
 import androidx.annotation.Nullable;
 import com.google.android.exoplayer2.C;
+import com.google.android.exoplayer2.DefaultLoadControl;
+import com.google.android.exoplayer2.DefaultRenderersFactory;
+import com.google.android.exoplayer2.ExoPlayerFactory;
+import com.google.android.exoplayer2.LoadControl;
 import com.google.android.exoplayer2.Player;
 import com.google.android.exoplayer2.SimpleExoPlayer;
 import com.google.android.exoplayer2.drm.DefaultDrmSessionManager;
@@ -38,20 +43,38 @@ import com.google.android.exoplayer2.drm.HttpMediaDrmCallback;
 import com.google.android.exoplayer2.source.MediaSource;
 import com.google.android.exoplayer2.source.ProgressiveMediaSource;
 import com.google.android.exoplayer2.source.dash.DashMediaSource;
+import com.google.android.exoplayer2.trackselection.AdaptiveTrackSelection;
+import com.google.android.exoplayer2.trackselection.DefaultTrackSelector;
+import com.google.android.exoplayer2.trackselection.TrackSelection;
+import com.google.android.exoplayer2.trackselection.TrackSelector;
 import com.google.android.exoplayer2.ui.PlayerControlView;
 import com.google.android.exoplayer2.upstream.DataSource;
 import com.google.android.exoplayer2.upstream.DefaultDataSourceFactory;
 import com.google.android.exoplayer2.upstream.DefaultHttpDataSourceFactory;
+import com.google.android.exoplayer2.upstream.DefaultLoadErrorHandlingPolicy;
 import com.google.android.exoplayer2.upstream.HttpDataSource;
 import com.google.android.exoplayer2.util.Assertions;
 import com.google.android.exoplayer2.util.Util;
+import java.io.IOException;
+import java.security.SecureRandom;
+import java.security.cert.X509Certificate;
 import java.util.UUID;
+import javax.net.ssl.HostnameVerifier;
+import javax.net.ssl.HttpsURLConnection;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLSession;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.X509TrustManager;
 
 /** Activity that demonstrates use of {@link SurfaceControl} with ExoPlayer. */
 public final class MainActivity extends Activity {
 
-  private static final String DEFAULT_MEDIA_URI =
-      "https://storage.googleapis.com/exoplayer-test-media-1/mkv/android-screens-lavf-56.36.100-aac-avc-main-1280x720.mkv";
+//  private static final String DEFAULT_MEDIA_URI =
+//      "http://bitmovin-a.akamaihd.net/content/art-of-motion_drm/mpds/11331.mpd";
+private static final String DEFAULT_MEDIA_URI =
+    "https://edge-linear.spectrum.net/LIVE/1010/dash/cenc/CONOPS02/manifest.mpd";
+//  private static final String DEFAULT_MEDIA_URI = "https://live-ex.enwd.co.sc.charterlab.com/dash/3001/cenc/C14N_F3/manifest.mpd";
+
   private static final String SURFACE_CONTROL_NAME = "surfacedemo";
 
   private static final String ACTION_VIEW = "com.google.android.exoplayer.surfacedemo.action.VIEW";
@@ -75,6 +98,9 @@ public final class MainActivity extends Activity {
     super.onCreate(savedInstanceState);
     setContentView(R.layout.main_activity);
     playerControlView = findViewById(R.id.player_control_view);
+
+    handleSSLHandshake();
+
     fullScreenView = findViewById(R.id.full_screen_view);
     fullScreenView.setOnClickListener(
         v -> {
@@ -136,6 +162,35 @@ public final class MainActivity extends Activity {
     }
   }
 
+  public static void handleSSLHandshake() {
+    try {
+      TrustManager[] trustAllCerts = new TrustManager[]{new X509TrustManager() {
+        public X509Certificate[] getAcceptedIssuers() {
+          return new X509Certificate[0];
+        }
+
+        @Override
+        public void checkClientTrusted(X509Certificate[] certs, String authType) {
+        }
+
+        @Override
+        public void checkServerTrusted(X509Certificate[] certs, String authType) {
+        }
+      }};
+
+      SSLContext sc = SSLContext.getInstance("SSL");
+      sc.init(null, trustAllCerts, new SecureRandom());
+      HttpsURLConnection.setDefaultSSLSocketFactory(sc.getSocketFactory());
+      HttpsURLConnection.setDefaultHostnameVerifier(new HostnameVerifier() {
+        @Override
+        public boolean verify(String arg0, SSLSession arg1) {
+          return true;
+        }
+      });
+    } catch (Exception ignored) {
+    }
+  }
+
   @Override
   public void onResume() {
     super.onResume();
@@ -186,10 +241,15 @@ public final class MainActivity extends Activity {
             : Uri.parse(DEFAULT_MEDIA_URI);
     String userAgent = Util.getUserAgent(this, getString(R.string.application_name));
     DrmSessionManager<ExoMediaCrypto> drmSessionManager;
-    if (intent.hasExtra(DRM_SCHEME_EXTRA)) {
-      String drmScheme = Assertions.checkNotNull(intent.getStringExtra(DRM_SCHEME_EXTRA));
-      String drmLicenseUrl = Assertions.checkNotNull(intent.getStringExtra(DRM_LICENSE_URL_EXTRA));
-      UUID drmSchemeUuid = Assertions.checkNotNull(Util.getDrmUuid(drmScheme));
+//    if (intent.hasExtra(DRM_SCHEME_EXTRA)) {
+//      String drmScheme = Assertions.checkNotNull(intent.getStringExtra(DRM_SCHEME_EXTRA));
+//      String drmLicenseUrl = Assertions.checkNotNull(intent.getStringExtra(DRM_LICENSE_URL_EXTRA));
+//      UUID drmSchemeUuid = Assertions.checkNotNull(Util.getDrmUuid(drmScheme));
+    UUID drmSchemeUuid = Util.getDrmUuid("widevine");
+
+      String drmLicenseUrl = "https://twc.live.ott.irdeto.com/widevine/getlicense?CrmId=twc&AccountId=twc&Ticket=68E76E4E81B15E29&ContentId=986&sessionId=8622F04B5E0B7432";
+//      String drmLicenseUrl = "https://charterae.stage.ott.irdeto.com/widevine/getlicense?CrmId=twc&AccountId=twc&ContentId=3AC_Linear4&SubContentType=Default";
+
       HttpDataSource.Factory licenseDataSourceFactory = new DefaultHttpDataSourceFactory(userAgent);
       HttpMediaDrmCallback drmCallback =
           new HttpMediaDrmCallback(drmLicenseUrl, licenseDataSourceFactory);
@@ -197,9 +257,9 @@ public final class MainActivity extends Activity {
           new DefaultDrmSessionManager.Builder()
               .setUuidAndExoMediaDrmProvider(drmSchemeUuid, FrameworkMediaDrm.DEFAULT_PROVIDER)
               .build(drmCallback);
-    } else {
-      drmSessionManager = DrmSessionManager.getDummyDrmSessionManager();
-    }
+//    } else {
+//      drmSessionManager = DrmSessionManager.getDummyDrmSessionManager();
+//    }
 
     DataSource.Factory dataSourceFactory =
         new DefaultDataSourceFactory(
@@ -219,7 +279,20 @@ public final class MainActivity extends Activity {
     } else {
       throw new IllegalStateException();
     }
-    SimpleExoPlayer player = new SimpleExoPlayer.Builder(getApplicationContext()).build();
+
+    DefaultLoadControl.Builder myBuilder = new DefaultLoadControl.Builder();
+    myBuilder.setBufferDurationsMs(10000, 16000, 2000, 1000);
+    LoadControl someLoadControl = myBuilder.createDefaultLoadControl();
+
+    TrackSelection.Factory adaptiveTrackSelectionFactory =
+        new AdaptiveTrackSelection.Factory();
+    TrackSelector trackSelector = new DefaultTrackSelector(adaptiveTrackSelectionFactory);
+
+
+
+    SimpleExoPlayer player = new SimpleExoPlayer.Builder(getApplicationContext()).setLoadControl(someLoadControl).setTrackSelector(trackSelector).build();
+
+
     player.prepare(mediaSource);
     player.setPlayWhenReady(true);
     player.setRepeatMode(Player.REPEAT_MODE_ALL);
@@ -280,3 +353,6 @@ public final class MainActivity extends Activity {
     }
   }
 }
+
+
+

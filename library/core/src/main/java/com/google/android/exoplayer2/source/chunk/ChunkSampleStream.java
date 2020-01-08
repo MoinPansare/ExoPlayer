@@ -15,10 +15,12 @@
  */
 package com.google.android.exoplayer2.source.chunk;
 
+import android.net.Uri;
 import androidx.annotation.Nullable;
 import com.google.android.exoplayer2.C;
 import com.google.android.exoplayer2.Format;
 import com.google.android.exoplayer2.FormatHolder;
+import com.google.android.exoplayer2.MoinSingelton;
 import com.google.android.exoplayer2.SeekParameters;
 import com.google.android.exoplayer2.decoder.DecoderInputBuffer;
 import com.google.android.exoplayer2.drm.DrmSession;
@@ -60,6 +62,8 @@ public class ChunkSampleStream<T extends ChunkSource> implements SampleStream, S
   private static final String TAG = "ChunkSampleStream";
 
   public final int primaryTrackType;
+
+  public int Max_Skippable_Segments = 3;
 
   @Nullable private final int[] embeddedTrackTypes;
   @Nullable private final Format[] embeddedTrackFormats;
@@ -402,6 +406,11 @@ public class ChunkSampleStream<T extends ChunkSource> implements SampleStream, S
 
   @Override
   public void onLoadCompleted(Chunk loadable, long elapsedRealtimeMs, long loadDurationMs) {
+
+    Max_Skippable_Segments = 3;
+    Log.e("Moin Error Counter", Max_Skippable_Segments + "");
+
+
     chunkSource.onChunkLoadCompleted(loadable);
     eventDispatcher.loadCompleted(
         loadable.dataSpec,
@@ -453,70 +462,139 @@ public class ChunkSampleStream<T extends ChunkSource> implements SampleStream, S
       long loadDurationMs,
       IOException error,
       int errorCount) {
-    long bytesLoaded = loadable.bytesLoaded();
-    boolean isMediaChunk = isMediaChunk(loadable);
-    int lastChunkIndex = mediaChunks.size() - 1;
-    boolean cancelable =
-        bytesLoaded == 0 || !isMediaChunk || !haveReadFromMediaChunk(lastChunkIndex);
-    long blacklistDurationMs =
-        cancelable
-            ? loadErrorHandlingPolicy.getBlacklistDurationMsFor(
-                loadable.type, loadDurationMs, error, errorCount)
-            : C.TIME_UNSET;
-    LoadErrorAction loadErrorAction = null;
-    if (chunkSource.onChunkLoadError(loadable, cancelable, error, blacklistDurationMs)) {
-      if (cancelable) {
-        loadErrorAction = Loader.DONT_RETRY;
-        if (isMediaChunk) {
-          BaseMediaChunk removed = discardUpstreamMediaChunksFromIndex(lastChunkIndex);
-          Assertions.checkState(removed == loadable);
-          if (mediaChunks.isEmpty()) {
-            pendingResetPositionUs = lastSeekPositionUs;
-          }
-        }
-      } else {
-        Log.w(TAG, "Ignoring attempt to cancel non-cancelable load.");
-      }
-    }
 
-    if (loadErrorAction == null) {
-      // The load was not cancelled. Either the load must be retried or the error propagated.
-      long retryDelayMs =
-          loadErrorHandlingPolicy.getRetryDelayMsFor(
-              loadable.type, loadDurationMs, error, errorCount);
-      loadErrorAction =
-          retryDelayMs != C.TIME_UNSET
-              ? Loader.createRetryAction(/* resetErrorCount= */ false, retryDelayMs)
-              : Loader.DONT_RETRY_FATAL;
-    }
+//    Log.e("Error Count : ", errorCount + "");
 
-    boolean canceled = !loadErrorAction.isRetry();
-    eventDispatcher.loadError(
-        loadable.dataSpec,
-        loadable.getUri(),
-        loadable.getResponseHeaders(),
-        loadable.type,
-        primaryTrackType,
-        loadable.trackFormat,
-        loadable.trackSelectionReason,
-        loadable.trackSelectionData,
-        loadable.startTimeUs,
-        loadable.endTimeUs,
-        elapsedRealtimeMs,
-        loadDurationMs,
-        bytesLoaded,
-        error,
-        canceled);
-    if (canceled) {
+    if(errorCount > 3 && Max_Skippable_Segments >= 0){
+
+      Max_Skippable_Segments -= 1;
+      Log.e("Moin Error Counter", Max_Skippable_Segments + "");
+
+      chunkSource.onChunkLoadCompleted(loadable);
+      eventDispatcher.loadCompleted(
+          loadable.dataSpec,
+          loadable.getUri(),
+          loadable.getResponseHeaders(),
+          loadable.type,
+          primaryTrackType,
+          loadable.trackFormat,
+          loadable.trackSelectionReason,
+          loadable.trackSelectionData,
+          loadable.startTimeUs,
+          loadable.endTimeUs,
+          elapsedRealtimeMs,
+          loadDurationMs,
+          loadable.bytesLoaded());
       callback.onContinueLoadingRequested(this);
+      LoadErrorAction loadErrorAction = null;
+      loadErrorAction = Loader.DONT_RETRY;
+      return loadErrorAction;
+    }else{
+      long bytesLoaded = loadable.bytesLoaded();
+      boolean isMediaChunk = isMediaChunk(loadable);
+      int lastChunkIndex = mediaChunks.size() - 1;
+      boolean cancelable =
+          bytesLoaded == 0 || !isMediaChunk || !haveReadFromMediaChunk(lastChunkIndex);
+      long blacklistDurationMs =
+          cancelable
+              ? loadErrorHandlingPolicy.getBlacklistDurationMsFor(
+              loadable.type, loadDurationMs, error, errorCount)
+              : C.TIME_UNSET;
+      LoadErrorAction loadErrorAction = null;
+
+      MoinSingelton.getInstance().errorOccured = true;
+
+      if (chunkSource.onChunkLoadError(loadable, cancelable, error, blacklistDurationMs)) {
+        if (cancelable) {
+          loadErrorAction = Loader.DONT_RETRY;
+          if (isMediaChunk) {
+            BaseMediaChunk removed = discardUpstreamMediaChunksFromIndex(lastChunkIndex);
+            Assertions.checkState(removed == loadable);
+            if (mediaChunks.isEmpty()) {
+              pendingResetPositionUs = lastSeekPositionUs;
+              //this.seekToUs(pendingResetPositionUs+1);
+            }
+          }
+        } else {
+          Log.w(TAG, "Ignoring attempt to cancel non-cancelable load.");
+        }
+      }
+
+      if (loadErrorAction == null) {
+        // The load was not cancelled. Either the load must be retried or the error propagated.
+        long retryDelayMs =
+            loadErrorHandlingPolicy.getRetryDelayMsFor(
+                loadable.type, loadDurationMs, error, errorCount);
+        loadErrorAction =
+            retryDelayMs != C.TIME_UNSET
+                ? Loader.createRetryAction(/* resetErrorCount= */ false, retryDelayMs)
+                : Loader.DONT_RETRY_FATAL;
+      }
+
+      // Moin Shit
+    /*
+
+    String numberOnly= loadable.getUri().toString();
+    String[] numberOnly_1= numberOnly.split("/");
+    numberOnly = numberOnly_1[numberOnly_1.length - 1];
+    numberOnly_1 = numberOnly.split("-");
+    numberOnly = numberOnly_1[numberOnly_1.length - 1];
+    numberOnly_1 = numberOnly.split(".m");
+    int myIndex = Integer.parseInt(numberOnly_1[0]);
+    int newMyIndex = myIndex + 1;
+
+    String newUrl = loadable.getUri().toString().replace(myIndex + "", newMyIndex + "");
+
+    Chunk newCHunk = chunkSource.getNextChunk(loadable.startTimeUs, );
+    loadable.dataSpec.uri = Uri.parse(newUrl);
+
+    // also replace loadable.getUri() below with Uri.parse(newUrl)
+
+
+     */
+
+//    chunkSource.getNextChunk(positionUs, loadPositionUs, chunkQueue, nextChunkHolder);
+//    boolean endOfStream = nextChunkHolder.endOfStream;
+//    loadable = nextChunkHolder.chunk;
+//    nextChunkHolder.clear();
+
+
+      boolean canceled = !loadErrorAction.isRetry();
+      eventDispatcher.loadError(
+          loadable.dataSpec,
+          loadable.getUri(),
+          loadable.getResponseHeaders(),
+          loadable.type,
+          primaryTrackType,
+          loadable.trackFormat,
+          loadable.trackSelectionReason,
+          loadable.trackSelectionData,
+          loadable.startTimeUs,
+          loadable.endTimeUs,
+          elapsedRealtimeMs,
+          loadDurationMs,
+          bytesLoaded,
+          error,
+          canceled);
+      if (canceled) {
+        callback.onContinueLoadingRequested(this);
+      }
+      return loadErrorAction;
     }
-    return loadErrorAction;
   }
 
   // SequenceableLoader implementation
 
   @Override
   public boolean continueLoading(long positionUs) {
+
+//    Log.d("__Moin___LoadingFinished", loadingFinished + "");
+//    Log.d("__Moin___isLoading", loader.isLoading() + "");
+//    Log.d("__Moin___Link", loader.);
+//    Log.d("__Moin___FatalError", loader.hasFatalError() + "");
+//    Log.d("__Moin___FatalError", MoinSingelton.getInstance().errorOccured + "");
+
+
     if (loadingFinished || loader.isLoading() || loader.hasFatalError()) {
       return false;
     }
@@ -532,6 +610,11 @@ public class ChunkSampleStream<T extends ChunkSource> implements SampleStream, S
       loadPositionUs = getLastMediaChunk().endTimeUs;
     }
     chunkSource.getNextChunk(positionUs, loadPositionUs, chunkQueue, nextChunkHolder);
+
+//    Log.d("_Moin_PositionUS", positionUs + "");
+//    Log.d("_Moin_loadPositionUs", loadPositionUs + "");
+//    Log.d("_Moin_chunkQueue", chunkQueue + "");
+
     boolean endOfStream = nextChunkHolder.endOfStream;
     Chunk loadable = nextChunkHolder.chunk;
     nextChunkHolder.clear();
@@ -543,6 +626,7 @@ public class ChunkSampleStream<T extends ChunkSource> implements SampleStream, S
     }
 
     if (loadable == null) {
+//      Log.d("Moin logs", "Media CHunk Error");
       return false;
     }
 
@@ -557,6 +641,10 @@ public class ChunkSampleStream<T extends ChunkSource> implements SampleStream, S
       mediaChunk.init(mediaChunkOutput);
       mediaChunks.add(mediaChunk);
     }
+
+//    Log.d("Moin URL", loadable.dataSpec + "");
+
+
     long elapsedRealtimeMs =
         loader.startLoading(
             loadable, this, loadErrorHandlingPolicy.getMinimumLoadableRetryCount(loadable.type));
@@ -583,6 +671,7 @@ public class ChunkSampleStream<T extends ChunkSource> implements SampleStream, S
     if (isPendingReset()) {
       return pendingResetPositionUs;
     } else {
+//      Log.d("Moin End Position", getLastMediaChunk().endTimeUs + "");
       return loadingFinished ? C.TIME_END_OF_SOURCE : getLastMediaChunk().endTimeUs;
     }
   }

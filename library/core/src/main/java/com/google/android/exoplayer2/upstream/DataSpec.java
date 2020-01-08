@@ -82,7 +82,7 @@ public final class DataSpec {
   /**
    * The source from which data should be read.
    */
-  public final Uri uri;
+  public Uri uri;
 
   /**
    * The HTTP method, which will be used by {@link HttpDataSource} when requesting this DataSpec.
